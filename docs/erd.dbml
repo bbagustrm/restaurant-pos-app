@@ -1,0 +1,227 @@
+// ============================================================
+// POS & Kitchen Display System — Database Schema
+// dbdiagram.io syntax (DBML)
+// Copy-paste ke https://dbdiagram.io/d
+// ============================================================
+
+Project pos_kds {
+  database_type: 'MySQL'
+  Note: 'POS & Kitchen Display System for Restaurant / Coffee Shop'
+}
+
+// ─────────────────────────────────────────────
+// AUTH & ROLES (Laravel + Spatie Permission)
+// ─────────────────────────────────────────────
+
+Table users {
+  id          varchar(36)   [pk, note: 'UUID']
+  name        varchar(255)  [not null]
+  email       varchar(255)  [not null, unique]
+  password    varchar(255)  [not null]
+  created_at  timestamp
+  updated_at  timestamp
+
+  Note: 'Laravel default users table'
+}
+
+Table roles {
+  id          bigint        [pk, increment]
+  name        varchar(125)  [not null, note: 'super_admin | cashier | kitchen']
+  guard_name  varchar(125)  [not null, default: 'web']
+  created_at  timestamp
+  updated_at  timestamp
+}
+
+Table model_has_roles {
+  role_id     bigint        [not null, ref: > roles.id]
+  model_type  varchar(255)  [not null]
+  model_id    varchar(36)   [not null, note: 'UUID of users']
+
+  indexes {
+    (role_id, model_type, model_id) [pk]
+  }
+}
+
+// ─────────────────────────────────────────────
+// MENU MANAGEMENT
+// ─────────────────────────────────────────────
+
+Table categories {
+  id          varchar(36)   [pk, note: 'UUID']
+  name        varchar(100)  [not null]
+  slug        varchar(100)  [not null, unique]
+  icon        varchar(50)   [null, note: 'Heroicon name e.g. cake, coffee']
+  color       varchar(7)    [null, note: 'Hex color e.g. #3B82F6']
+  sort_order  int           [not null, default: 0]
+  is_active   boolean       [not null, default: true]
+  created_at  timestamp
+  updated_at  timestamp
+
+  Note: 'Menu categories: Makanan, Minuman, Dessert, dll'
+}
+
+Table products {
+  id           varchar(36)     [pk, note: 'UUID']
+  category_id  varchar(36)     [not null, ref: > categories.id]
+  name         varchar(150)    [not null]
+  slug         varchar(150)    [not null, unique]
+  description  text            [null]
+  price        decimal(10,2)   [not null]
+  image        varchar(255)    [null, note: 'Path: products/filename.jpg']
+  is_available boolean         [not null, default: true]
+  is_featured  boolean         [not null, default: false]
+  sort_order   int             [not null, default: 0]
+  deleted_at   timestamp       [null, note: 'Soft delete']
+  created_at   timestamp
+  updated_at   timestamp
+
+  indexes {
+    category_id
+    slug [unique]
+    (is_available, is_featured)
+  }
+
+  Note: 'Menu items / produk yang dijual'
+}
+
+// ─────────────────────────────────────────────
+// TABLE MANAGEMENT
+// ─────────────────────────────────────────────
+
+Table restaurant_tables {
+  id         varchar(36)   [pk, note: 'UUID']
+  name       varchar(50)   [not null, note: 'e.g. Meja 1, Bar 2, Takeaway']
+  capacity   int           [not null, default: 4]
+  status     varchar(20)   [not null, default: 'available', note: 'available | occupied | reserved']
+  created_at timestamp
+  updated_at timestamp
+
+  Note: 'Meja restoran. Rename dari "tables" untuk menghindari konflik SQL reserved word'
+}
+
+// ─────────────────────────────────────────────
+// ORDER MANAGEMENT
+// ─────────────────────────────────────────────
+
+Table orders {
+  id              varchar(36)    [pk, note: 'UUID']
+  order_number    varchar(20)    [not null, unique, note: 'Format: ORD-20240615-0001']
+  table_id        varchar(36)    [null, ref: > restaurant_tables.id, note: 'NULL = takeaway']
+  cashier_id      varchar(36)    [not null, ref: > users.id]
+  status          varchar(20)    [not null, default: 'pending', note: 'pending | confirmed | preparing | ready | completed | cancelled']
+  payment_method  varchar(20)    [null, note: 'cash | qris | transfer | card']
+  payment_status  varchar(20)    [not null, default: 'unpaid', note: 'unpaid | paid | refunded']
+  subtotal        decimal(10,2)  [not null, default: 0]
+  discount_type   varchar(20)    [null, note: 'fixed | percentage']
+  discount_amount decimal(10,2)  [not null, default: 0]
+  tax_percentage  decimal(5,2)   [not null, default: 11.00, note: 'PPN Indonesia default 11%']
+  tax_amount      decimal(10,2)  [not null, default: 0]
+  total_amount    decimal(10,2)  [not null, default: 0]
+  notes           text           [null, note: 'Catatan order dari kasir']
+  paid_at         timestamp      [null]
+  completed_at    timestamp      [null]
+  created_at      timestamp
+  updated_at      timestamp
+
+  indexes {
+    order_number [unique]
+    cashier_id
+    table_id
+    status
+    payment_status
+    created_at
+    (status, created_at) [note: 'Untuk query KDS dan laporan']
+  }
+
+  Note: 'Transaksi order. Snapshot harga ada di order_items'
+}
+
+Table order_items {
+  id             varchar(36)    [pk, note: 'UUID']
+  order_id       varchar(36)    [not null, ref: > orders.id]
+  product_id     varchar(36)    [not null, ref: > products.id]
+  product_name   varchar(150)   [not null, note: 'Snapshot nama saat order dibuat']
+  product_price  decimal(10,2)  [not null, note: 'Snapshot harga saat order dibuat']
+  quantity       int            [not null, default: 1]
+  notes          varchar(255)   [null, note: 'e.g. Tanpa gula, Extra pedas']
+  status         varchar(20)    [not null, default: 'pending', note: 'pending | preparing | ready | served']
+  created_at     timestamp
+  updated_at     timestamp
+
+  indexes {
+    order_id
+    product_id
+    status
+  }
+
+  Note: 'Item per order. product_name & product_price di-snapshot agar tidak berubah jika menu diedit'
+}
+
+// ─────────────────────────────────────────────
+// SETTINGS (via spatie/laravel-settings)
+// ─────────────────────────────────────────────
+
+Table settings {
+  id    bigint       [pk, increment]
+  group varchar(255) [not null, note: 'Class name: RestaurantSettings']
+  name  varchar(255) [not null]
+  locked boolean     [not null, default: false]
+  payload json       [not null]
+
+  indexes {
+    (group, name) [unique]
+  }
+
+  Note: 'Key-value settings via spatie/laravel-settings. Jangan edit manual.'
+}
+
+// ─────────────────────────────────────────────
+// ACTIVITY LOG (via spatie/laravel-activitylog)
+// ─────────────────────────────────────────────
+
+Table activity_log {
+  id             bigint        [pk, increment]
+  log_name       varchar(255)  [null]
+  description    text          [not null]
+  subject_type   varchar(255)  [null]
+  event          varchar(255)  [null]
+  subject_id     varchar(36)   [null]
+  causer_type    varchar(255)  [null]
+  causer_id      varchar(36)   [null, note: 'UUID of users']
+  properties     json          [null]
+  batch_uuid     varchar(36)   [null]
+  created_at     timestamp
+  updated_at     timestamp
+
+  indexes {
+    (subject_type, subject_id)
+    (causer_type, causer_id)
+    log_name
+  }
+
+  Note: 'Audit trail otomatis via spatie/laravel-activitylog'
+}
+
+// ─────────────────────────────────────────────
+// ENUM REFERENCE (tidak dibuat sebagai tabel,
+// hanya dokumentasi nilai yang valid)
+// ─────────────────────────────────────────────
+
+// orders.status:
+//   pending    → Order dibuat, belum dikonfirmasi
+//   confirmed  → Dikonfirmasi, masuk antrian dapur
+//   preparing  → Dapur sedang memproses
+//   ready      → Siap disajikan
+//   completed  → Selesai & lunas
+//   cancelled  → Dibatalkan
+
+// order_items.status:
+//   pending    → Menunggu diproses dapur
+//   preparing  → Sedang dimasak
+//   ready      → Selesai dimasak, siap disajikan
+//   served     → Sudah disajikan ke meja
+
+// restaurant_tables.status:
+//   available  → Kosong
+//   occupied   → Ada order aktif
+//   reserved   → Dipesan (untuk fitur reservasi masa depan)
